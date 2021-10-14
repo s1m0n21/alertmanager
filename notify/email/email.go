@@ -88,7 +88,7 @@ func (n *Email) auth(mechs string) (smtp.Auth, error) {
 				err.Add(errors.New("missing secret for CRAM-MD5 auth mechanism"))
 				continue
 			}
-			return smtp.CRAMMD5Auth(username, secret), nil
+			return n.useUnencryptedAuth(smtp.CRAMMD5Auth(username, secret)), nil
 
 		case "PLAIN":
 			password := string(n.conf.AuthPassword)
@@ -98,20 +98,28 @@ func (n *Email) auth(mechs string) (smtp.Auth, error) {
 			}
 			identity := n.conf.AuthIdentity
 
-			return smtp.PlainAuth(identity, username, password, n.conf.Smarthost.Host), nil
+			return n.useUnencryptedAuth(smtp.PlainAuth(identity, username, password, n.conf.Smarthost.Host)), nil
 		case "LOGIN":
 			password := string(n.conf.AuthPassword)
 			if password == "" {
 				err.Add(errors.New("missing password for LOGIN auth mechanism"))
 				continue
 			}
-			return LoginAuth(username, password), nil
+			return n.useUnencryptedAuth(LoginAuth(username, password)), nil
 		}
 	}
 	if err.Len() == 0 {
 		err.Add(errors.New("unknown auth mechanism: " + mechs))
 	}
 	return nil, err
+}
+
+// useUnencryptedAuth determine if unencryptedAuth is enabled.
+func (n *Email) useUnencryptedAuth(auth smtp.Auth) smtp.Auth {
+	if *n.conf.UnencryptedAuth {
+		return unencryptedAuth{auth}
+	}
+	return auth
 }
 
 // Notify implements the Notifier interface.
@@ -352,4 +360,13 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 		}
 	}
 	return nil, nil
+}
+
+type unencryptedAuth struct {
+	smtp.Auth
+}
+
+func (a unencryptedAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	(*server).TLS = true
+	return a.Auth.Start(server)
 }
